@@ -11,14 +11,41 @@ import {
 } from '@/api/auth'
 import { APP_ID } from '@/config'
 
-onLaunch(() => {
+onLaunch((options = {}) => {
 	console.log('App Launch')
 	// 冷启动从本地恢复会话，避免 Pinia 空态导致登录态丢失
 	main.init()
 	// #ifdef MP-WEIXIN
+	// 扫小程序码进入：scene 为编码后的 query（如 token=xxx）
+	const scene = options && options.query && options.query.scene
+	if (scene) {
+		setTimeout(() => {
+			uni.reLaunch({
+				url: '/pages/scan/scan?scene=' + encodeURIComponent(scene)
+			})
+		}, 50)
+		return
+	}
+	// 未确定商户时先选择商户
+	if (!uni.getStorageSync('tenantId')) {
+		setTimeout(() => {
+			uni.reLaunch({ url: '/pages/tenant/tenant' })
+		}, 50)
+		return
+	}
 	// 冷启动静默登录一次；已有 token 则跳过
 	if (!main.isLogin) {
 		wechatMiniLogin()
+	}
+	// #endif
+	// #ifdef H5
+	const currentHash = (typeof location !== 'undefined' && location.hash) ? location.hash : ''
+	if (!uni.getStorageSync('tenantId')
+		&& currentHash.indexOf('/pages/scan/scan') === -1
+		&& currentHash.indexOf('/pages/tenant/tenant') === -1) {
+		setTimeout(() => {
+			uni.reLaunch({ url: '/pages/tenant/tenant' })
+		}, 50)
 	}
 	// #endif
 })
@@ -32,8 +59,8 @@ onShow(() => {
 	}
 	// #endif
 	// #ifdef MP-WEIXIN
-	// 仅在 token 失效/未登录时再静默登录，避免每次 onShow 都强制登录
-	if (!main.isLogin) {
+	// 仅在已确定商户且 token 失效/未登录时再静默登录
+	if (!main.isLogin && uni.getStorageSync('tenantId')) {
 		wechatMiniLogin()
 	}
 	// #endif

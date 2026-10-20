@@ -26,6 +26,7 @@ import co.yixiang.yshop.module.message.mq.producer.WeixinNoticeProducer;
 import co.yixiang.yshop.module.message.redismq.msg.OrderMsg;
 import co.yixiang.yshop.module.order.controller.app.order.param.AppOrderParam;
 import co.yixiang.yshop.module.order.controller.app.order.param.AppPayParam;
+import co.yixiang.yshop.module.order.controller.app.order.vo.AppDeskOrderSummaryVO;
 import co.yixiang.yshop.module.order.controller.app.order.vo.AppStoreOrderQueryVo;
 import co.yixiang.yshop.module.order.convert.storeorder.StoreOrderConvert;
 import co.yixiang.yshop.module.order.dal.dataobject.ordernumber.OrderNumberDO;
@@ -47,7 +48,11 @@ import co.yixiang.yshop.module.product.dal.dataobject.storeproductattrvalue.Stor
 import co.yixiang.yshop.module.product.service.storeproduct.AppStoreProductService;
 import co.yixiang.yshop.module.product.service.storeproductattrvalue.StoreProductAttrValueService;
 import co.yixiang.yshop.module.store.convert.storeshop.StoreShopConvert;
+import co.yixiang.yshop.module.store.dal.dataobject.storedesk.StoreDeskDO;
+import co.yixiang.yshop.module.store.dal.dataobject.storedesk.StoreDeskQrDO;
 import co.yixiang.yshop.module.store.dal.dataobject.storeshop.StoreShopDO;
+import co.yixiang.yshop.module.store.service.storedesk.StoreDeskQrService;
+import co.yixiang.yshop.module.store.service.storedesk.StoreDeskService;
 import co.yixiang.yshop.module.store.service.storeshop.AppStoreShopService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
@@ -117,6 +122,10 @@ public class AppStoreOrderServiceImpl extends ServiceImpl<StoreOrderMapper,Store
     @Resource
     private AppStoreShopService appStoreShopService;
     @Resource
+    private StoreDeskService storeDeskService;
+    @Resource
+    private StoreDeskQrService storeDeskQrService;
+    @Resource
     private OrderNumberMapper orderNumberMapper;
     @Resource
     private AppCouponUserService appCouponUserService;
@@ -153,6 +162,44 @@ public class AppStoreOrderServiceImpl extends ServiceImpl<StoreOrderMapper,Store
     }
 
 
+    @Override
+    public List<AppStoreOrderQueryVo> getActiveDeskOrderList(Long deskId, Long qrId, Long uid) {
+        if (deskId == null || uid == null) {
+            return Collections.emptyList();
+        }
+        LambdaQueryWrapper<StoreOrderDO> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(StoreOrderDO::getDeskId, deskId)
+                .eq(qrId != null, StoreOrderDO::getDeskQrId, qrId)
+                .eq(StoreOrderDO::getUid, uid)
+                .in(StoreOrderDO::getStatus, Arrays.asList(0, 1, 2, 3))
+                .orderByDesc(StoreOrderDO::getId);
+        return storeOrderMapper.selectList(wrapper).stream()
+                .map(StoreOrderConvert.INSTANCE::convert1)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public AppDeskOrderSummaryVO getDeskOrderSummary(Long deskId, Long qrId) {
+        AppDeskOrderSummaryVO summary = new AppDeskOrderSummaryVO();
+        summary.setDeskId(deskId);
+        if (deskId == null) {
+            summary.setOrderCount(0);
+            summary.setTotalAmount(BigDecimal.ZERO);
+            return summary;
+        }
+        LambdaQueryWrapper<StoreOrderDO> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(StoreOrderDO::getDeskId, deskId)
+                .eq(qrId != null, StoreOrderDO::getDeskQrId, qrId)
+                .in(StoreOrderDO::getStatus, Arrays.asList(0, 1, 2, 3));
+        List<StoreOrderDO> orders = storeOrderMapper.selectList(wrapper);
+        BigDecimal total = orders.stream()
+                .map(item -> item.getPayPrice() == null ? BigDecimal.ZERO : item.getPayPrice())
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        summary.setOrderCount(orders.size());
+        summary.setTotalAmount(total);
+        return summary;
+    }
+
     /**
      * 创建订单
      *
@@ -177,6 +224,30 @@ public class AppStoreOrderServiceImpl extends ServiceImpl<StoreOrderMapper,Store
         List<String> cartIds = new ArrayList<>();
 
         StoreShopDO storeShopDO = appStoreShopService.getById(param.getShopId());
+        if (storeShopDO == null) {
+            throw exception(STORE_ORDER_DESK_NOT);
+        }
+        // 实时校验营业时间，避免闭店后仍可下单
+        if (!appStoreShopService.isOpen(storeShopDO)) {
+            throw exception(SHOP_NOT_OPEN);
+        }
+        // 扫码点餐：校验桌号归属与启用状态
+        StoreDeskDO storeDesk = null;
+        StoreDeskQrDO storeDeskQr = null;
+        if (OrderLogEnum.ORDER_TAKE_DESK.getValue().equals(param.getOrderType())) {
+            storeDesk = storeDeskService.getByShopIdAndNumber(storeShopDO.getId(), param.getDeskNumber());
+            if (storeDesk == null || storeDesk.getStatus() == null || storeDesk.getStatus() != 1) {
+                throw exception(STORE_ORDER_DESK_NOT);
+            }
+            // 一桌多码：校验二维码归属与状态
+            if (param.getDeskQrId() != null) {
+                storeDeskQr = storeDeskQrService.getQr(param.getDeskQrId());
+                if (storeDeskQr == null || !storeDesk.getId().equals(storeDeskQr.getDeskId())
+                        || storeDeskQr.getStatus() == null || storeDeskQr.getStatus() != 1) {
+                    throw exception(STORE_ORDER_DESK_NOT);
+                }
+            }
+        }
 
         BigDecimal sumPrice = BigDecimal.ZERO;
         BigDecimal couponPrice = BigDecimal.ZERO;
@@ -241,66 +312,72 @@ public class AppStoreOrderServiceImpl extends ServiceImpl<StoreOrderMapper,Store
         BigDecimal gainIntegral = this.getGainIntegral(productIds);
 
         StoreOrderDO storeOrder = new StoreOrderDO();
-        String orderSn = "";
-        //todo 桌面点餐功能 商业版本才有 官网地址：https://www.yixiang.co
-        if(OrderLogEnum.ORDER_TAKE_DESK.getValue().equals(param.getOrderType())
-                && StrUtil.isNotBlank(param.getOrderId())){
+        //生成分布式唯一值
+        String orderSn = IdUtil.getSnowflake(0, 0).nextIdStr();
 
-        }else{
-            //生成分布式唯一值
-            orderSn = IdUtil.getSnowflake(0, 0).nextIdStr();
+        //添加取餐表
+        OrderNumberDO orderNumberDO = OrderNumberDO.builder().orderId(orderSn).build();
+        orderNumberMapper.insert(orderNumberDO);
 
-            //添加取餐表
-            OrderNumberDO orderNumberDO = OrderNumberDO.builder().orderId(orderSn).build();
-            orderNumberMapper.insert(orderNumberDO);
-
-            //组合数据
-            LocalDateTime localDateTime = LocalDateTime.now();
-            storeOrder.setGetTime(localDateTime.plusMinutes(param.getGettime()));
-            storeOrder.setNumberId(orderNumberDO.getId());
-            storeOrder.setShopId(storeShopDO.getId());
-            storeOrder.setShopName(storeShopDO.getName());
-            storeOrder.setUid(uid);
-            storeOrder.setOrderId(orderSn);
-            //处理如果是外卖 地址
-            if(OrderLogEnum.ORDER_TAKE_OUT.getValue().equals(param.getOrderType())){
-                if (StrUtil.isEmpty(param.getAddressId())) {
-                    throw exception(SELECT_ADDRESS);
-                }
-                UserAddressDO userAddress = appUserAddressService.getById(param.getAddressId());
-                if (ObjectUtil.isNull(userAddress)) {
-                    throw exception(USER_ADDRESS_NOT_EXISTS);
-                }
-                storeOrder.setRealName(userAddress.getRealName());
-                storeOrder.setUserPhone(userAddress.getPhone());
-                storeOrder.setUserAddress(userAddress.getAddress() + " " + userAddress.getDetail());
+        //组合数据
+        LocalDateTime localDateTime = LocalDateTime.now();
+        storeOrder.setGetTime(localDateTime.plusMinutes(param.getGettime()));
+        storeOrder.setNumberId(orderNumberDO.getId());
+        storeOrder.setShopId(storeShopDO.getId());
+        storeOrder.setShopName(storeShopDO.getName());
+        storeOrder.setUid(uid);
+        storeOrder.setOrderId(orderSn);
+        // 扫码点餐：记录桌台信息；携带 orderId 时视为对原桌订单的“加菜”单
+        if (storeDesk != null) {
+            storeOrder.setDeskId(storeDesk.getId());
+            storeOrder.setDeskNumber(storeDesk.getDeskNumber());
+            storeOrder.setDeskPeople(param.getDeskPeople() == null ? 1 : param.getDeskPeople());
+            if (storeDeskQr != null) {
+                storeOrder.setDeskQrId(storeDeskQr.getId());
+                storeOrder.setDeskQrName(storeDeskQr.getQrName());
             }
-            storeOrder.setCartId(StrUtil.join(",", cartIds));
-            storeOrder.setTotalNum(totalNum);
-            storeOrder.setTotalPrice(sumPrice);
-            storeOrder.setTotalPostage(storeShopDO.getDeliveryPrice());
-
-            storeOrder.setCouponId(StrUtil.isBlank(param.getCouponId()) ? 0 : Integer.valueOf(param.getCouponId()));
-            storeOrder.setCouponPrice(couponPrice);
-            storeOrder.setPayPrice(payPrice);
-            storeOrder.setPayPostage(storeShopDO.getDeliveryPrice());
-            storeOrder.setDeductionPrice(deductionPrice);
-            storeOrder.setPaid(OrderInfoEnum.PAY_STATUS_0.getValue());
-            storeOrder.setPayType(param.getPayType());
-            storeOrder.setUseIntegral(BigDecimal.ZERO);
-            storeOrder.setBackIntegral(BigDecimal.ZERO);
-            storeOrder.setGainIntegral(gainIntegral);
-            storeOrder.setMark(param.getRemark());
-            storeOrder.setCost(BigDecimal.ZERO);
-            //storeOrder.setUnique(key);
-            storeOrder.setShippingType(OrderInfoEnum.SHIPPIING_TYPE_1.getValue());
-            storeOrder.setOrderType(param.getOrderType());
-
-
-            boolean res = this.save(storeOrder);
-            if (!res) {
-                throw exception(ORDER_GEN_FAIL);
+            if (StrUtil.isNotBlank(param.getOrderId())) {
+                storeOrder.setExtendOrderId(param.getOrderId());
             }
+        }
+        //处理如果是外卖 地址
+        if(OrderLogEnum.ORDER_TAKE_OUT.getValue().equals(param.getOrderType())){
+            if (StrUtil.isEmpty(param.getAddressId())) {
+                throw exception(SELECT_ADDRESS);
+            }
+            UserAddressDO userAddress = appUserAddressService.getById(param.getAddressId());
+            if (ObjectUtil.isNull(userAddress)) {
+                throw exception(USER_ADDRESS_NOT_EXISTS);
+            }
+            storeOrder.setRealName(userAddress.getRealName());
+            storeOrder.setUserPhone(userAddress.getPhone());
+            storeOrder.setUserAddress(userAddress.getAddress() + " " + userAddress.getDetail());
+        }
+        storeOrder.setCartId(StrUtil.join(",", cartIds));
+        storeOrder.setTotalNum(totalNum);
+        storeOrder.setTotalPrice(sumPrice);
+        storeOrder.setTotalPostage(storeShopDO.getDeliveryPrice());
+
+        storeOrder.setCouponId(StrUtil.isBlank(param.getCouponId()) ? 0 : Integer.valueOf(param.getCouponId()));
+        storeOrder.setCouponPrice(couponPrice);
+        storeOrder.setPayPrice(payPrice);
+        storeOrder.setPayPostage(storeShopDO.getDeliveryPrice());
+        storeOrder.setDeductionPrice(deductionPrice);
+        storeOrder.setPaid(OrderInfoEnum.PAY_STATUS_0.getValue());
+        storeOrder.setPayType(param.getPayType());
+        storeOrder.setUseIntegral(BigDecimal.ZERO);
+        storeOrder.setBackIntegral(BigDecimal.ZERO);
+        storeOrder.setGainIntegral(gainIntegral);
+        storeOrder.setMark(param.getRemark());
+        storeOrder.setCost(BigDecimal.ZERO);
+        //storeOrder.setUnique(key);
+        storeOrder.setShippingType(OrderInfoEnum.SHIPPIING_TYPE_1.getValue());
+        storeOrder.setOrderType(param.getOrderType());
+
+
+        boolean res = this.save(storeOrder);
+        if (!res) {
+            throw exception(ORDER_GEN_FAIL);
         }
 
 

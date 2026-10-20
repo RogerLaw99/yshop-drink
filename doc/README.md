@@ -77,6 +77,12 @@
 | [yshop-drink-vue3.md](frontend/yshop-drink-vue3.md) | 商家后台：技术栈、目录、路由体系、API 层、Pinia、页面清单、权限、核心流程 |
 | [yshop-drink-uniapp-vue3.md](frontend/yshop-drink-uniapp-vue3.md) | 用户移动端：多端构建、页面与分包、flyio 请求层、登录、扫码点餐、下单支付、订单、积分 |
 
+### 3.1 专项文档
+
+| 文档 | 说明 |
+|---|---|
+| [scan-order.md](scan-order.md) | 扫码点餐：桌台管理、二维码令牌、共享购物车、一起点/分开点、合并下单 |
+
 ## 4. 后端模块关系速览
 
 ```

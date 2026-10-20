@@ -82,6 +82,27 @@ public class AppOrderController {
         return success(appStoreOrderService.createOrder(uid, param));
     }
 
+    @PreAuthenticated
+    @GetMapping("/desk-active")
+    @Operation(summary = "获取当前用户在桌台进行中的订单（本人加菜）")
+    @Parameter(name = "deskId", description = "桌台编号", required = true)
+    public CommonResult<List<AppStoreOrderQueryVo>> getActiveDeskOrders(
+            @RequestParam("deskId") Long deskId,
+            @RequestParam(value = "qrId", required = false) Long qrId) {
+        return success(appStoreOrderService.getActiveDeskOrderList(deskId, qrId, getLoginUserId()));
+    }
+
+    @PreAuthenticated
+    @GetMapping("/desk-summary")
+    @Operation(summary = "获取桌台进行中订单汇总（多人同桌）")
+    @Parameter(name = "deskId", description = "桌台编号", required = true)
+    @Parameter(name = "qrId", description = "二维码编号", required = false)
+    public CommonResult<co.yixiang.yshop.module.order.controller.app.order.vo.AppDeskOrderSummaryVO> getDeskOrderSummary(
+            @RequestParam("deskId") Long deskId,
+            @RequestParam(value = "qrId", required = false) Long qrId) {
+        return success(appStoreOrderService.getDeskOrderSummary(deskId, qrId));
+    }
+
 
     /**
      * 订单支付

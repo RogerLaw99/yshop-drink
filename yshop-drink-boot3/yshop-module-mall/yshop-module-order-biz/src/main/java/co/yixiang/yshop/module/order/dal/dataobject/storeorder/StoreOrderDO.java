@@ -261,6 +261,31 @@ public class StoreOrderDO extends BaseDO {
     private String shopName;
 
     /**
+     * 桌台编号
+     */
+    private Long deskId;
+
+    /**
+     * 桌号
+     */
+    private String deskNumber;
+
+    /**
+     * 就餐人数
+     */
+    private Integer deskPeople;
+
+    /**
+     * 桌台二维码编号
+     */
+    private Long deskQrId;
+
+    /**
+     * 桌台二维码名称
+     */
+    private String deskQrName;
+
+    /**
      * 取餐时间
      */
     private LocalDateTime getTime;

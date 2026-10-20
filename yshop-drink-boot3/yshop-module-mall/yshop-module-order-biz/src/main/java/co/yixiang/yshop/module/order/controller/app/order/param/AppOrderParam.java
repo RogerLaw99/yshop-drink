@@ -58,6 +58,12 @@ public class AppOrderParam implements Serializable {
     @Schema(description = "就餐人数", required = true)
     private Integer deskPeople;
 
+    @Schema(description = "桌台二维码编号")
+    private Long deskQrId;
+
+    @Schema(description = "桌台二维码名称")
+    private String deskQrName;
+
     @Schema(description = "订单号", required = true)
     private String orderId;
 

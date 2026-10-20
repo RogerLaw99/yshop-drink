@@ -14,6 +14,18 @@
       }
     },
     {
+      "path": "pages/scan/scan",
+      "style": {
+        "navigationBarTitleText": "扫码点餐"
+      }
+    },
+    {
+      "path": "pages/tenant/tenant",
+      "style": {
+        "navigationBarTitleText": "选择商家"
+      }
+    },
+    {
       "path": "pages/order/order",
       "style": {
         "navigationBarTitleText": "订单",

@@ -14,6 +14,20 @@ export function orderSubmit(data) {
   return api.post(`/order/create`, data, { login: true })
 }
 
+/**
+ * 获取桌台当前进行中的订单（同桌加菜）
+ */
+export function getActiveDeskOrders(data) {
+  return api.get('/order/desk-active', data, { login: true })
+}
+
+/**
+ * 获取本桌进行中订单汇总（多人同桌、分开下单）
+ */
+export function getDeskOrderSummary(data) {
+  return api.get('/order/desk-summary', data, { login: true })
+}
+
 
 
 /**

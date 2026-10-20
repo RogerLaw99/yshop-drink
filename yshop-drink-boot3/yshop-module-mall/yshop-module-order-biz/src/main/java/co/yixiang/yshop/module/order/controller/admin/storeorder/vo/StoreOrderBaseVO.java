@@ -236,4 +236,14 @@ public class StoreOrderBaseVO {
      */
     private Integer deskPeople;
 
+    /**
+     * 桌台二维码编号
+     */
+    private Long deskQrId;
+
+    /**
+     * 桌台二维码名称
+     */
+    private String deskQrName;
+
 }

@@ -51,4 +51,10 @@ public class StoreOrderPageReqVO extends PageParam {
     @Schema(description = "桌面id")
     private Integer deskId;
 
+    @Schema(description = "桌号")
+    private String deskNumber;
+
+    @Schema(description = "二维码名称")
+    private String deskQrName;
+
 }

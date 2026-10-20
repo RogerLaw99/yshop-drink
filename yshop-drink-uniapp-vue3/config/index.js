@@ -1,4 +1,7 @@
-const DEV_API_URL = 'http://localhost:48081/app-api'
+// 开发环境：H5 下自动使用当前页面所在主机（便于手机通过局域网 IP 访问），其他端回退 localhost
+const DEV_API_HOST =
+  typeof window !== 'undefined' && window.location ? window.location.hostname : 'localhost'
+const DEV_API_URL = `http://${DEV_API_HOST}:48081/app-api`
 const PROD_API_URL = 'https://apidc.yixiang.co/app-api'
 
 // #ifdef APP-PLUS || H5 || MP-WEIXIN

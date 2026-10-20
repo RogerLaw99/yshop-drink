@@ -22,4 +22,12 @@ public interface AppStoreShopService extends IService<StoreShopDO> {
      */
     List<AppStoreShopVO> getStoreList(double lon,double lat,String name,Integer shopId);
 
+    /**
+     * 按营业时间判断门店当前是否营业（支持跨天营业）
+     *
+     * @param shop 门店
+     * @return 是否营业
+     */
+    boolean isOpen(StoreShopDO shop);
+
 }

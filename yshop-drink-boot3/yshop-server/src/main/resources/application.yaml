@@ -183,7 +183,7 @@ yshop:
     db-schemas: ${spring.datasource.dynamic.datasource.master.name}
     front-type: 10 # 前端模版的类型，参见 CodegenFrontTypeEnum 枚举类
   tenant: # 多租户相关配置项
-    enable: false
+    enable: true
     ignore-urls:
       - /admin-api/system/tenant/get-id-by-name # 基于名字获取租户，不许带租户编号
       - /admin-api/system/tenant/get-by-website # 基于域名获取租户，不许带租户编号
@@ -196,6 +196,8 @@ yshop:
       - /admin-api/mp/open/** # 微信公众号开放平台，微信回调接口，无法携带租户编号
       - /admin-api/file/qrcode/** # 二维码不需要
       - /app-api/order/notify/* # 支付回调通知，不携带租户编号
+      - /app-api/store/desk/get # 扫码解析桌台，此时还不知道租户
+      - /app-api/tenant/list # 用户端选择商户，此时还不知道租户
     ignore-tables:
       - system_tenant
       - system_tenant_package
@@ -222,13 +224,7 @@ yshop:
       - infra_job_log
       - infra_job_log
       - infra_data_source_config
-      - yshop_store_product_attr
-      - yshop_store_product_attr_result
-      - yshop_store_product_attr_value
-      - yshop_store_order_cart_info
-      - yshop_store_order_status
-      - yshop_order_number
-      - yshop_qrcode
+      - yshop_express # 快递公司字典，全局共享
   sms-code: # 短信验证码相关的配置项
     expire-times: 10m
     send-frequency: 1m

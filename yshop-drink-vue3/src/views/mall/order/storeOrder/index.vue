@@ -4,6 +4,7 @@
       <el-tab-pane label="全部订单" name=""/>
       <el-tab-pane label="外卖订单" name="takeout"/>
       <el-tab-pane label="自取订单" name="takein"/>
+      <el-tab-pane label="堂食订单" name="desk"/>
     </el-tabs>
     <el-form-item label="订单状态：" >
       <el-radio-group v-model="orderStatus" size="large"  fill="#DC143C" @change="queryOrderStatus">
@@ -62,6 +63,24 @@
           class="!w-240px"
         />
       </el-form-item>
+      <el-form-item label="桌号" prop="deskNumber">
+        <el-input
+          v-model="queryParams.deskNumber"
+          placeholder="请输入桌号，如 A01"
+          clearable
+          @keyup.enter="handleQuery"
+          class="!w-180px"
+        />
+      </el-form-item>
+      <el-form-item label="二维码" prop="deskQrName">
+        <el-input
+          v-model="queryParams.deskQrName"
+          placeholder="请输入二维码名称，如 A01-左"
+          clearable
+          @keyup.enter="handleQuery"
+          class="!w-200px"
+        />
+      </el-form-item>
 
       <el-form-item label="创建时间" prop="createTime">
         <el-date-picker
@@ -90,6 +109,7 @@
       <el-table-column label="门店" align="center" prop="shopName" width="100" />
       <el-table-column label="取餐号" align="center" prop="numberId" />
       <el-table-column label="桌号" align="center" prop="deskNumber" />
+      <el-table-column label="二维码" align="center" prop="deskQrName" width="120" />
       <el-table-column label="订单号" align="center" prop="orderId" width="240">
         <template #default="scope">
           <span>
@@ -258,7 +278,9 @@ const queryParams = reactive({
   createTime: [],
   orderStatus: "",
   payStatus: "",
-  orderType: ""
+  orderType: "",
+  deskNumber: "",
+  deskQrName: ""
 
 })
 const queryFormRef = ref() // 搜索的表单

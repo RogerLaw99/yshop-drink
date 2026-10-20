@@ -36,6 +36,10 @@ public interface ErrorCodeConstants {
 
 
     ErrorCode STORE_ORDER_DESK_NOT = new ErrorCode(1008007023, "当前桌号不存在");
+    ErrorCode SHOP_NOT_OPEN = new ErrorCode(1008007024, "门店当前未营业，请稍后再试");
+    ErrorCode DESK_SESSION_NOT_OPEN = new ErrorCode(1008007025, "桌台会话已结束，请重新扫码");
+    ErrorCode DESK_CART_EMPTY = new ErrorCode(1008007026, "共享购物车为空");
+    ErrorCode DESK_CART_ITEM_NOT_EXISTS = new ErrorCode(1008007027, "购物车商品不存在");
 
 
 

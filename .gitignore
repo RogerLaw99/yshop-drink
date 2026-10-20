@@ -7,5 +7,8 @@
 /yshop-drink-uniapp-vue3/node_modules
 /dcdoc/
 
+# 本地运行日志与数据库备份
+/.run-logs/
+
 # CodeGraph 本地索引
 .codegraph/

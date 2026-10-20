@@ -8,6 +8,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.validation.annotation.Validated;
 
 import jakarta.annotation.Resource;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.List;
 
 /**
@@ -33,5 +35,23 @@ public class AppStoreShopServiceImpl extends ServiceImpl<StoreShopMapper, StoreS
     @Override
     public List<AppStoreShopVO> getStoreList(double lon, double lat,String name,Integer shopId) {
         return shopMapper.getStoreList(lon,lat,name,shopId);
+    }
+
+    @Override
+    public boolean isOpen(StoreShopDO shop) {
+        if (shop == null || shop.getStartTime() == null || shop.getEndTime() == null) {
+            return false;
+        }
+        LocalTime now = LocalTime.now();
+        LocalTime start = shop.getStartTime().toInstant().atZone(ZoneId.systemDefault()).toLocalTime();
+        LocalTime end = shop.getEndTime().toInstant().atZone(ZoneId.systemDefault()).toLocalTime();
+        if (start.equals(end)) {
+            return true;
+        }
+        if (start.isBefore(end)) {
+            return !now.isBefore(start) && !now.isAfter(end);
+        }
+        // 跨天营业，如 22:00 - 02:00
+        return !now.isBefore(start) || !now.isAfter(end);
     }
 }

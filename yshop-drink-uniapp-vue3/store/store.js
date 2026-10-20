@@ -8,6 +8,23 @@ export const useMainStore = defineStore('main', {
 	store: {},
 	cart: [],
 	orderType: 'takein',
+	// 扫码点餐信息（桌号、人数、门店）
+	desk: {
+		deskNumber: '',
+		deskPeople: 1,
+		shopId: null,
+		deskId: null,
+		qrId: null,
+		qrName: '',
+		activeOrderId: null,
+		orderCount: 0,
+		orderTotal: 0,
+		// shared：一起点（共享购物车，一人支付）；separate：分开点（各自下单）
+		mode: 'shared',
+		sessionId: null,
+		cartCount: 0,
+		cartTotal: 0
+	},
 	address: {},
 	addresses: {},
 	member: {
@@ -15,6 +32,8 @@ export const useMainStore = defineStore('main', {
 	},
 	openid:"",
 	token:"",
+	// 当前商户（租户）
+	tenant: { id: null, name: '' },
 	lang: 'zh-cn',
 	cookieKey:'YSESSID=yshop-e4dk4o2utr3c0n95tp42p745ai',
 	// 默认地为你为北京地址
@@ -35,6 +54,26 @@ export const useMainStore = defineStore('main', {
 	},
 	SET_ORDER_TYPE(type) {
 	  	this.orderType = type
+	},
+	SET_DESK(desk) {
+		this.desk = { ...this.desk, ...desk }
+	},
+	CLEAR_DESK() {
+		this.desk = {
+			deskNumber: '',
+			deskPeople: 1,
+			shopId: null,
+			deskId: null,
+			qrId: null,
+			qrName: '',
+			activeOrderId: null,
+			orderCount: 0,
+			orderTotal: 0,
+			mode: 'shared',
+			sessionId: null,
+			cartCount: 0,
+			cartTotal: 0
+		}
 	},
 	SET_MEMBER(member) {
 		this.member = member
@@ -72,6 +111,15 @@ export const useMainStore = defineStore('main', {
 		this.token = token;
 		cookie.set('accessToken', token)
 	},
+	SET_TENANT(tenant) {
+		this.tenant = { ...this.tenant, ...tenant }
+		if (tenant.id) {
+			uni.setStorageSync('tenantId', tenant.id)
+		}
+		if (tenant.name) {
+			uni.setStorageSync('tenantName', tenant.name)
+		}
+	},
 	  
     setAccessToken(user) {
       cookie.set('accessToken', user)
@@ -89,6 +137,10 @@ export const useMainStore = defineStore('main', {
       }
       if (userinfo && typeof userinfo === 'object') {
         this.member = userinfo
+      }
+      this.tenant = {
+        id: uni.getStorageSync('tenantId') || null,
+        name: uni.getStorageSync('tenantName') || ''
       }
     },
     logout() {

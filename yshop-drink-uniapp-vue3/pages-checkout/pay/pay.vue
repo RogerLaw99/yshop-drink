@@ -11,8 +11,8 @@
 				<template v-if="store.distance > 0">
 					<list-cell class="pay-page__cell pay-page__cell--location">
 						<view class="flex-fill d-flex justify-content-between align-items-center">
-							<view class="store-name flex-fill">{{ orderType == 'takeout' ? '外卖配送' : '点餐自取' }}</view>
-							<uv-switch activeColor="#09b4f1" v-model="active" @change="takout">
+							<view class="store-name flex-fill">{{ orderType == 'takeout' ? '外卖配送' : (orderType == 'desk' ? '堂食 · 桌号 ' + desk.deskNumber : '点餐自取') }}</view>
+							<uv-switch v-if="orderType != 'desk'" activeColor="#09b4f1" v-model="active" @change="takout">
 							</uv-switch>
 						</view>
 					</list-cell>
@@ -46,6 +46,16 @@
 						<view class="flex-fill d-flex justify-content-between align-items-center">
 							<view class="store-name flex-fill">{{ store.name }}</view>
 							<image src="/static/images/navigator-1.png" class="pay-page__arrow"></image>
+						</view>
+					</list-cell>
+					<list-cell v-if="orderType == 'desk'">
+						<view class="flex-fill d-flex justify-content-between align-items-center">
+							<view class="title">桌号</view>
+							<view class="time desk-people">
+								<button class="desk-people__btn" @click.stop="changeDeskPeople(-1)">-</button>
+								<text class="desk-people__num">{{ desk.deskNumber }} · {{ desk.deskPeople }}人</text>
+								<button class="desk-people__btn" @click.stop="changeDeskPeople(1)">+</button>
+							</view>
 						</view>
 					</list-cell>
 				</template>
@@ -235,11 +245,15 @@ import {
 import {
   couponCount
 } from '@/api/coupon'
+import {
+  checkoutDeskCart,
+  getDeskSession
+} from '@/api/desk'
 // #ifdef H5
 import * as jweixin from 'weixin-js-sdk'
 // #endif
 const main = useMainStore()
-const { orderType,address, store,location,isLogin,member,mycoupon } = storeToRefs(main)
+const { orderType,address, store,location,isLogin,member,mycoupon,desk } = storeToRefs(main)
 const active = ref(false)
 const title = ref('支付')
 const jsStr = ref('')
@@ -299,6 +313,30 @@ const uToast = ref()
 const total = computed(() =>{
 	return cart.value.reduce((acc, cur) => acc + cur.number * cur.price, 0);
 })
+// 堂食“一起点”：共享购物车模式
+const isSharedDesk = computed(() => orderType.value === 'desk' && desk.value.mode !== 'separate')
+
+const syncSharedCart = async () => {
+	if (!isSharedDesk.value || !desk.value.sessionId) return
+	try {
+		const session = await getDeskSession(desk.value.sessionId)
+		if (session && session.status === 0) {
+			cart.value = (session.cartList || []).map(item => ({
+				id: item.productId,
+				cartItemId: item.id,
+				name: item.name,
+				price: Number(item.price),
+				number: item.number,
+				image: item.image,
+				valueStr: item.sku
+			}))
+			main.SET_DESK({ cartCount: session.totalNumber, cartTotal: session.totalAmount })
+		}
+	} catch (e) {
+		console.log('同步共享购物车失败', e)
+	}
+}
+
 const amount = computed(() =>{
 	let amount = cart.value.reduce((acc, cur) => acc + cur.number * cur.price, 0);
 	// 加配送费
@@ -318,6 +356,7 @@ const amount = computed(() =>{
 })
 
 onShow(() => {
+	syncSharedCart()
 	coupon.value = main.mycoupon
 	let date = new Date(new Date().getTime() + 3600000); // 一个小时后
 	let hour = date.getHours();
@@ -371,8 +410,8 @@ const setPayType = (paytype) => {
 	})
 }
 const getCoupons = async() => {
-	//0=通用,1=自取,2=外卖
-	let type = orderType.value == 'takein' ? 1 : 2;
+	//0=通用,1=自取/堂食,2=外卖
+	let type = orderType.value == 'takeout' ? 2 : 1;
 	let data = await couponCount({
 		shop_id: store.value.id ? store.value.id : 0,
 		type: type
@@ -380,6 +419,12 @@ const getCoupons = async() => {
 	if (data) {
 		coupons.value = data;
 	}
+}
+// 选择时间
+const changeDeskPeople = (delta) => {
+	if (orderType.value !== 'desk') return
+	const next = Math.min(20, Math.max(1, Number(desk.value.deskPeople || 1) + delta))
+	main.SET_DESK({ deskPeople: next })
 }
 // 选择时间
 const choiceTime = (value) => {
@@ -455,7 +500,7 @@ const chooseAddress = () => {
 const goToPackages = () => {
 	let newamount = amount.value;
 	let coupon_id = coupon.value.id ? coupon.value.id : 0;
-	let type = orderType.value == 'takein' ? 1 : 2;
+	let type = orderType.value == 'takeout' ? 2 : 1;
 	let shop_id = store.value.id;
 	uni.navigateTo({
 		url: '/pages-checkout/packages/index?amount=' + newamount + '&coupon_id=' + coupon_id +
@@ -551,8 +596,44 @@ const pay = async() => {
 		data.number.push(item.number);
 	});
 
-	//console.log(data);
-	let order = await orderSubmit(data);
+	// 扫码点餐：携带桌号信息
+	if (orderType.value === 'desk') {
+		data.deskNumber = desk.value.deskNumber;
+		data.deskPeople = desk.value.deskPeople;
+		if (desk.value.deskId) {
+			data.deskId = desk.value.deskId;
+		}
+		if (desk.value.qrId) {
+			data.deskQrId = desk.value.qrId;
+			data.deskQrName = desk.value.qrName;
+		}
+		// 同桌已有订单时，作为加菜单关联到原订单
+		if (desk.value.activeOrderId) {
+			data.orderId = desk.value.activeOrderId;
+		}
+	}
+
+	// 堂食“一起点”：由服务端共享购物车生成一笔合并订单
+	let order = null;
+	if (isSharedDesk.value) {
+		const res = await checkoutDeskCart({
+			sessionId: desk.value.sessionId,
+			payType: payType.value,
+			remark: form.value.remark,
+			deskPeople: desk.value.deskPeople,
+			couponId: coupon.value.id ? coupon.value.id : 0,
+			mobile: member.value.mobile
+		});
+		if (!res) {
+			uni.hideLoading();
+			return;
+		}
+		order = { orderId: res.orderId };
+		main.SET_DESK({ sessionId: null, cartCount: 0, cartTotal: 0 });
+		uni.removeStorageSync('cart');
+	} else {
+		order = await orderSubmit(data);
+	}
 	if (!order) {
 		uni.hideLoading();
 		return;
@@ -601,6 +682,9 @@ const balancePay = async(order) => {
 	member.value.money -= amount.value
 	main.SET_MEMBER(member.value)
 	uni.removeStorageSync('cart');
+	if (orderType.value === 'desk') {
+		main.CLEAR_DESK()
+	}
 	uni.switchTab({
 		url: '/pages/order/order',
 		fail(res) {
@@ -649,6 +733,9 @@ const weixinPay = async(order) => {
 			success: function(res) {
 
 				uni.removeStorageSync('cart');
+				if (orderType.value === 'desk') {
+					main.CLEAR_DESK()
+				}
 				uni.switchTab({
 					url: '/pages/order/order'
 				});

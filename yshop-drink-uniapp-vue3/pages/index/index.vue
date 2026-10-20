@@ -113,6 +113,7 @@ const handGetListAds = async () => {
 }
 
 const takein = () => {
+	main.CLEAR_DESK()
 	main.SET_ORDER_TYPE('takein')
 	uni.switchTab({
 		url: '/pages/menu/menu'
@@ -120,6 +121,7 @@ const takein = () => {
 }
 
 const takeout = () => {
+	main.CLEAR_DESK()
 	main.SET_ORDER_TYPE('takeout')
 	uni.switchTab({
 		url: '/pages/menu/menu'

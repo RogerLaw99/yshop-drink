@@ -29,6 +29,24 @@ public interface AppStoreOrderService extends IService<StoreOrderDO> {
      */
     AppStoreOrderQueryVo getOrderInfo(String unique, Long uid);
 
+    /**
+     * 查询当前用户在指定桌台的进行中订单（用于本人加菜）
+     *
+     * @param deskId 桌台编号
+     * @param uid    用户编号
+     * @return 订单列表
+     */
+    List<AppStoreOrderQueryVo> getActiveDeskOrderList(Long deskId, Long qrId, Long uid);
+
+    /**
+     * 汇总指定桌台/二维码当前进行中的订单
+     *
+     * @param deskId 桌台编号
+     * @param qrId   二维码编号（可为空）
+     * @return 订单数、合计金额
+     */
+    co.yixiang.yshop.module.order.controller.app.order.vo.AppDeskOrderSummaryVO getDeskOrderSummary(Long deskId, Long qrId);
+
 
     /**
      * 创建订单

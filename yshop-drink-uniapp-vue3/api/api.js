@@ -62,6 +62,15 @@ function baseRequest(options) {
     }
   }
 
+  // 多商户：携带当前商户（租户）编号
+  const tenantId = uni.getStorageSync('tenantId')
+  if (tenantId) {
+    options.headers = {
+      ...options.headers,
+      'tenant-id': tenantId,
+    }
+  }
+
   // 结构请求需要的参数
   const { url, params, data, login, ...option } = options
 

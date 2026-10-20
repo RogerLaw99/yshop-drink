@@ -18,7 +18,19 @@
 			<view class="nav">
 				<view class="header">
 					<view class="mr-1"><image :src="store.image" class="store-header-img"></image></view>
-					<view class="left" v-if="orderType == 'takein'">
+					<view class="left" v-if="orderType == 'desk'">
+						<view class="store-name">
+							<text>{{ store.name }}</text>
+						</view>
+						<view class="store-location">
+							<text>桌号 {{ desk.deskNumber }} · 堂食 {{ desk.deskPeople }} 人</text>
+							<text v-if="desk.qrName"> · 点餐码 {{ desk.qrName }}</text>
+							<text v-if="desk.mode !== 'separate' && desk.cartCount > 0"> · 共享 {{ desk.cartCount }} 件（¥{{ desk.cartTotal }}）</text>
+							<text v-if="desk.mode === 'separate' && desk.orderCount > 0"> · 本桌 {{ desk.orderCount }} 单（¥{{ desk.orderTotal }}）</text>
+							<text v-if="desk.mode === 'separate' && desk.activeOrderId"> · 我的订单可加菜</text>
+						</view>
+					</view>
+					<view class="left" v-else-if="orderType == 'takein'">
 						<view class="store-name" @click="selectShop()">
 							<text>{{ store.name }}</text>
 							<view class="iconfont iconarrow-right"></view>
@@ -37,12 +49,20 @@
 							<view class="iconfont iconarrow-right"></view>
 						</view>
 					</view>
-					<view class="right">
+					<view class="right" v-if="orderType != 'desk'">
 						<view class="dinein" :class="{active: orderType == 'takein'}" @tap="takein">
 							<text>自取</text>
 						</view>
 						<view class="takeout" :class="{active: orderType == 'takeout'}" @tap="takout">
 							<text>外卖</text>
+						</view>
+					</view>
+					<view class="right" v-else>
+						<view class="dinein" :class="{active: desk.mode !== 'separate'}" @tap="setDeskMode('shared')">
+							<text>一起点</text>
+						</view>
+						<view class="takeout" :class="{active: desk.mode === 'separate'}" @tap="setDeskMode('separate')">
+							<text>分开点</text>
 						</view>
 					</view>
 				</view>
@@ -250,8 +270,16 @@ import {
 import {
   menuAds
 } from '@/api/market'
+import {
+  joinDeskSession,
+  getDeskSession,
+  addDeskCartItem,
+  updateDeskCartItem,
+  deleteDeskCartItem,
+  clearDeskCart
+} from '@/api/desk'
 const main = useMainStore()
-const { orderType,address, store,location,isLogin } = storeToRefs(main)
+const { orderType,address, store,location,isLogin,desk } = storeToRefs(main)
 const title = ref('点餐')
 const text = ref('滚动通知')
 
@@ -307,6 +335,9 @@ const spread = computed(() => { //差多少元起送
 	if (orderType.value != 'takeout') return
 	return parseFloat((store.value.min_price - getCartGoodsPrice).toFixed(2))
 })
+// 堂食“一起点”：共享购物车模式
+const isSharedDesk = computed(() => orderType.value === 'desk' && desk.value.mode !== 'separate')
+let deskPollTimer = null
 
 // 监听自定义事件（需与 $off 使用同一引用）
 const refreshMenuHandler = () => {
@@ -318,21 +349,44 @@ uni.$on('refreshMenu', refreshMenuHandler)
 onPullDownRefresh(() => {
 	init()
 })
-onLoad(() => {
+onLoad((options = {}) => {
+	// 直接通过 H5 链接进入时，也支持携带桌号参数
+	if (options.deskNumber || options.desk) {
+		let deskNumber = options.deskNumber || options.desk
+		try {
+			deskNumber = decodeURIComponent(deskNumber)
+		} catch (e) {}
+		main.SET_ORDER_TYPE('desk')
+		main.SET_DESK({
+			deskNumber,
+			deskPeople: Number(options.deskPeople || options.people || 1) || 1,
+			shopId: (options.shopId || options.shop_id) ? Number(options.shopId || options.shop_id) : null,
+			deskId: (options.deskId || options.desk_id) ? Number(options.deskId || options.desk_id) : null
+		})
+	}
 	init();
 	refreshCart()
 })
 onHide(() => {
 	// 重新进入要重新计算页面高度，否则有问题
 	sizeCalcState.value = false;
+	stopDeskPolling()
 })
 onShow(() => {
-	//init();
+	// 扫码进入时，如果菜单页已加载过，需要按新门店重新初始化
+	if (orderType.value === 'desk' && desk.value.shopId && store.value.id != desk.value.shopId) {
+		init();
+	}
 	refreshCart()
 	shopAd.value = uni.getStorageSync('shopAd')
+	// 共享购物车：同步并轮询其他同桌成员的加购
+	if (isSharedDesk.value) {
+		syncDeskSession().then(() => startDeskPolling())
+	}
 })
 onUnload(() => {
 	uni.$off('refreshMenu', refreshMenuHandler)
+	stopDeskPolling()
 })
 
 const openCartShow = () =>{
@@ -354,7 +408,13 @@ const selectShop = () => {
 const uToast = ref()
 const  init = async() => { //页面初始化
 	loading.value = true;
-    
+
+	// 扫码点餐：按二维码中的门店直接加载，不依赖定位
+	if (orderType.value === 'desk' && desk.value.shopId) {
+		await getShopList({ latitude: 39.919990, longitude: 116.456270 });
+		return;
+	}
+
 	//return
 	let error = {},
 		result = location.value
@@ -409,7 +469,10 @@ const getShopList = async(res) => {
 		main.SET_LOCATION(res);
 	
 		let shop_id = 0;
-		if (store.value.id) {
+		// 扫码点餐优先使用二维码中的门店
+		if (desk.value.shopId) {
+			shop_id = desk.value.shopId;
+		} else if (store.value.id) {
 			shop_id = store.value.id;
 		}
 	
@@ -462,6 +525,84 @@ const refreshCart = () =>{
 		}
 	}
 }
+const findCateId = (productId) => {
+	for (const cate of goods.value) {
+		if ((cate.goodsList || []).some(g => g.id === productId)) {
+			return cate.id
+		}
+	}
+	return 0
+}
+const applyDeskSession = (session) => {
+	if (!session) return
+	main.SET_DESK({
+		sessionId: session.sessionId,
+		qrId: session.qrId || desk.value.qrId,
+		qrName: session.qrName || desk.value.qrName,
+		cartCount: session.totalNumber,
+		cartTotal: session.totalAmount
+	})
+	cart.value = (session.cartList || []).map(item => ({
+		id: item.productId,
+		cartItemId: item.id,
+		cate_id: findCateId(item.productId),
+		name: item.name,
+		price: Number(item.price),
+		number: item.number,
+		image: item.image,
+		valueStr: item.sku,
+		uid: item.uid,
+		nickname: item.nickname
+	}))
+	uni.setStorageSync('cart', JSON.parse(JSON.stringify(cart.value)))
+}
+const syncDeskSession = async () => {
+	if (!isSharedDesk.value || !isLogin.value) return
+	try {
+		let session = null
+		if (desk.value.sessionId) {
+			session = await getDeskSession(desk.value.sessionId)
+			if (session && session.status !== 0) {
+				session = null
+			}
+		}
+		if (!session) {
+			const token = uni.getStorageSync('lastDeskToken')
+			if (token) {
+				session = await joinDeskSession(token)
+			}
+		}
+		if (session) {
+			applyDeskSession(session)
+		}
+	} catch (e) {
+		console.log('同步共享购物车失败', e)
+	}
+}
+const startDeskPolling = () => {
+	stopDeskPolling()
+	if (!isSharedDesk.value) return
+	deskPollTimer = setInterval(syncDeskSession, 5000)
+}
+const stopDeskPolling = () => {
+	if (deskPollTimer) {
+		clearInterval(deskPollTimer)
+		deskPollTimer = null
+	}
+}
+const setDeskMode = (mode) => {
+	if (desk.value.mode === mode) return
+	stopDeskPolling()
+	main.SET_DESK({ mode })
+	cart.value = []
+	main.REMOVE_CART()
+	uni.removeStorageSync('cart')
+	if (mode === 'shared') {
+		syncDeskSession().then(() => startDeskPolling())
+	} else {
+		refreshCart()
+	}
+}
 const  getAds = async(shop_id) =>{
 	let data = await menuAds({
 		shop_id: shop_id ? shop_id : 0
@@ -472,6 +613,7 @@ const  getAds = async(shop_id) =>{
 }
 const takout = (force = false) => {
 	if (orderType.value == 'takeout' && force == false) return
+	if (orderType.value === 'desk') main.CLEAR_DESK()
 	main.SET_ORDER_TYPE('takeout');
 
 	if (!isLogin.value) {
@@ -484,6 +626,7 @@ const takout = (force = false) => {
 }
 const takein = (force = false) => {
 	if (orderType.value == 'takein' && force == false) return
+	if (orderType.value === 'desk') main.CLEAR_DESK()
 	main.SET_ORDER_TYPE('takein');
 
 	if (!isLogin.value) {
@@ -539,7 +682,33 @@ const calcSize = () => {
 	})
 	sizeCalcState.value = true
 }
-const handleAddToCart = (cate, newGood, num) =>{ //添加到购物车
+const handleAddToCart = async (cate, newGood, num) =>{ //添加到购物车
+	// 堂食“一起点”：写入服务端共享购物车
+	if (isSharedDesk.value) {
+		if (!isLogin.value) {
+			uni.navigateTo({ url: '/pages-user/login/login' })
+			return
+		}
+		if (!desk.value.sessionId) {
+			await syncDeskSession()
+		}
+		if (!desk.value.sessionId) {
+			uToast.value.show({ message: '桌台会话未建立，请重新扫码', type: 'error' })
+			return
+		}
+		try {
+			const session = await addDeskCartItem({
+				sessionId: desk.value.sessionId,
+				productId: newGood.id,
+				sku: good.value.valueStr || newGood.valueStr,
+				number: num
+			})
+			applyDeskSession(session)
+		} catch (e) {
+			console.log('加入共享购物车失败', e)
+		}
+		return
+	}
 	const index = cart.value.findIndex(item => {
 		if (newGood) {
 			return (item.id === newGood.id) && (item.valueStr === good.value.valueStr)
@@ -562,7 +731,19 @@ const handleAddToCart = (cate, newGood, num) =>{ //添加到购物车
 	}
 	uni.setStorageSync('cart', JSON.parse(JSON.stringify(cart.value)))
 }
-const handleReduceFromCart = (item, good) => {
+const handleReduceFromCart = async (item, good) => {
+	if (isSharedDesk.value) {
+		const target = cart.value.find(c => c.id === good.id && c.valueStr === (good.valueStr || item.valueStr))
+			|| cart.value.find(c => c.id === good.id)
+		if (!target) return
+		try {
+			const session = await updateDeskCartItem({ id: target.cartItemId, number: target.number - 1 })
+			applyDeskSession(session)
+		} catch (e) {
+			console.log('修改共享购物车失败', e)
+		}
+		return
+	}
 	const index = cart.value.findIndex(item => item.id === good.id)
 	cart.value[index].number -= 1
 	if (cart.value[index].number <= 0) {
@@ -648,17 +829,39 @@ const handleCartClear = () => { //清空购物车
 		}) => {
 			if (confirm) {
 				popup.value.close()
+				if (isSharedDesk.value && desk.value.sessionId) {
+					clearDeskCart(desk.value.sessionId).catch(e => console.log(e))
+					main.SET_DESK({ cartCount: 0, cartTotal: 0 })
+				}
 				cart.value = []
 				uni.setStorageSync('cart', JSON.parse(JSON.stringify(cart.value)))
 			}
 		}
 	})
 }
-const handleCartItemAdd = (index) => {
+const handleCartItemAdd = async (index) => {
+	if (isSharedDesk.value) {
+		const item = cart.value[index]
+		try {
+			applyDeskSession(await updateDeskCartItem({ id: item.cartItemId, number: item.number + 1 }))
+		} catch (e) {
+			console.log('修改共享购物车失败', e)
+		}
+		return
+	}
 	cart.value[index].number += 1
 	uni.setStorageSync('cart', JSON.parse(JSON.stringify(cart.value)))
 }
-const handleCartItemReduce = (index) => {
+const handleCartItemReduce = async (index) => {
+	if (isSharedDesk.value) {
+		const item = cart.value[index]
+		try {
+			applyDeskSession(await updateDeskCartItem({ id: item.cartItemId, number: item.number - 1 }))
+		} catch (e) {
+			console.log('修改共享购物车失败', e)
+		}
+		return
+	}
 	if (cart.value[index].number === 1) {
 		cart.value.splice(index, 1)
 	} else {
@@ -679,6 +882,10 @@ const toPay = () => {
 	} else {
 		if (store.value.status == 0) {
 			uToast.value.show({message:'不在店铺营业时间内',type: 'error'});
+			return;
+		}
+		if (isSharedDesk.value && (!desk.value.sessionId || cart.value.length === 0)) {
+			uToast.value.show({message:'共享购物车暂无商品，请先选购',type: 'error'});
 			return;
 		}
 		if(orderType.value == 'takeout' && store.value.distance <= 0){
